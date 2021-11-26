@@ -1,0 +1,491 @@
+*--------------------------------------------------
+* Determinants of Female Labour Force Participation in Canadian Provinces
+* sannikov_panel_project_final.do
+* 30/03/2021
+* Maria Sannikov
+*--------------------------------------------------
+
+*--------------------------------------------------
+*--------------------------------------------------
+* Program Setup
+*--------------------------------------------------
+*--------------------------------------------------
+
+set linesize 80 
+
+set more off
+
+log using "/Users/mariasannikov/Desktop/NICE EE/S2/PanelData/Log_file/panelproject_log.txt",replace     
+ // Open log file
+
+cd "/Users/mariasannikov/Desktop/NICE EE/S2/PanelData/Panel_Project"
+
+//load the dataset
+use  "Panel_data_2000_2018.dta", clear
+
+//Encoding the Province variable
+encode Province, gen(PR)
+drop Province
+
+//Generating a dummy variable for majority english-speaking Provinces
+gen primary_lang = 1
+replace primary_lang = 0 if PR ==9
+
+order PR Year f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ ///
+	primary_lang
+
+	
+	ssc install ivreg2
+	ssc install ivhettest
+	ssc install extremes
+	ssc install fre
+	ssc install collin
+	ssc install xttest2
+	ssc install xttest0
+//Declaring Panel-Data Structure
+
+xtset PR Year
+xtdescribe
+
+*--------------------------------------------------
+*--------------------------------------------------
+*Descriptive Statistics
+*--------------------------------------------------
+*--------------------------------------------------
+
+bysort Year: sum f_lfp
+xtsum	f_lfp
+
+tab Year if f_lfp==r(max)
+
+//Line Plot for f_lfp
+
+
+xtline f_lfp, overlay title(Female Labour Force Participation Rates 2000-2018) ///
+	t(Year) i(PR) legend(on) scheme(s2mono)
+	
+*--------------------------------------------------	
+*--------------------------------------------------
+*Preliminary Analysis for Model Fit 
+*--------------------------------------------------
+*--------------------------------------------------
+
+/*
+F-test to see if all coefficient in the model are different than 0:
+Do the indpendant variables reliably predict the dependant variable?
+*/
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang
+
+/*
+The p-value is smaller than 0.05, we can say overall that our independant 
+variables reliably predict the dependant variable which is Female Labour Force 
+Participation.
+*/
+
+//Testing our Assumptions under OLS:
+
+*Testing for Outliers
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang
+
+fre f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang, tabulate (6)
+
+predict r, rstudent
+
+stem r
+
+extremes f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang
+
+/*
+the stem-and-leaf plot for residuals allows us to spot any oultiers. we can see
+it's the case for -3.26
+*/
+
+
+*Assumption: Homoscedasticity of Residuals
+
+rvfplot, yline(0)
+
+/*
+A well-fitted model should not have any pattern in the residuals plot. 
+By using rvfplot with a reference line at 0, we observe slight pattern where our
+datapoints become narrower towards the right end. This is possibly an indication
+of heteroscedasticity. We can further test using the Breusch-Pagan Test.
+*/
+
+estat hettest
+
+/*
+The test result is as follows: we reject the null hypothesis that variance 
+of residuals is homogenous. Therefore, we accept the alternate hypothesis, 
+confirming indeed heteroscedasticity in our model.  
+*/
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang, ///
+	vce(robust)
+
+
+*Assumption: Bias
+
+
+reg f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang, nocon
+estimates store nocons
+
+reg f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang
+estimates store withcons
+
+estimates table nocons withcons, star(0.1 0.05 0.01) stats(N r2_a)
+
+/*
+Using the -nocons- option, the coefficients now estimate the difference 
+in expected outcome between that level and zero. So the coefficients estimate 
+entirely different things and are not directly comparable...
+*/
+
+
+*Assumption: Checking for Multicollinearity
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang
+
+vif
+
+/*
+According to the rule of thumb, VIF values > 10 are concerning.
+Our results shows a high VIF for f_educ and f_married indicate that these
+variables are possibly reduntant and could be considered as a linear combination
+of other independant variables. We can try to omit f_married to see if it impacts
+our VIF.
+*/
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate f_educ primary_lang
+
+vif
+
+/*
+Now the VIF appears to be satisfactory. We can also check collinearity with the
+collin command (needs to be installed). First we use it with the full model, 
+then we remove f_married and will see the collinearity diagnostics improve. 
+*/
+
+collin f_lfp fty_rate mean_capita_pi unemp_rate f_married f_educ primary_lang
+collin f_lfp fty_rate mean_capita_pi unemp_rate f_educ primary_lang
+
+*Assumption: Checking Linearity between f_lfp and predictors
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate f_educ primary_lang
+
+acprplot fty_rate, lowess lsopts(bwidth(1))
+acprplot mean_capita_pi, lowess lsopts(bwidth(1))
+acprplot unemp_rate, lowess lsopts(bwidth(1))
+acprplot f_educ, lowess lsopts(bwidth(1))
+acprplot primary_lang, lowess lsopts(bwidth(1))
+
+/*
+Using acproplot, we look to detect non-linearity. In most of our varaibles,
+there is a deviation from linearity. 
+*/
+
+graph matrix f_lfp fty_rate mean_capita_pi unemp_rate f_educ primary_lang, half
+kdensity unemp_rate, normal
+kdensity f_educ, normal
+
+/*
+It appears that f_educ is very skewed, a transformation of this variable may be 
+necessary. we can try with a log transformation. 
+*/
+
+gen log_feduc=log(f_educ)
+label variable log_feduc "log-10 of f_educ"
+kdensity log_feduc, normal
+
+/*
+Although it still seems to be skewed, it's better than it was before. We can redo
+our regression and check the acprplot again.
+*/
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang
+imtest, white
+acprplot log_feduc, lowess
+
+/*
+The plot shows a smaller deviation from nonlineairty than before but indeed the 
+issue still persists, more or less. the White test shows us that we do have
+heteroskedasticity in our model and it is also skewed, as previously evidenced. 
+*/
+
+predict res, residuals
+
+histogram res, frequency normal
+
+/*
+*While the white test suggests the presence of Heteroscedasticity, the residuals
+plot shows a normally distributed model with some skewness but it's not very 
+severe.
+*/
+
+*Assumption: Model Specification
+
+
+regress f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang
+
+linktest
+
+ovtest 
+
+/*
+From the above linktest, the test of _hatsq is not significant. This is to say 
+that linktest has failed to reject the assumption that the model is specified 
+correctly. Therefore, it seems to us that we don’t have a specification error. 
+_hatsq shows that squares predictions do not have much explanatory power. 
+*/
+
+
+*--------------------------------------------------
+*--------------------------------------------------
+*Panel Analysis
+*--------------------------------------------------
+*--------------------------------------------------
+
+
+*Pooled OLS
+*--------------------------------------------------
+
+xtset PR Year
+xtdescribe
+
+reg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang
+
+xttest0	
+
+/*
+The Breusch-Pagan test gives us a significant result meaning we should reject
+rejects var(u)=0 in favor of var(u) > 0, in which case the pooled OLS model might
+not be appropriate. 
+*/
+
+// + cluster robust inference
+reg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	,cluster(PR)
+
+// + period effect
+reg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	i.Year ,cluster(PR)
+	
+
+*Fixed-Effect (FE) Estimation
+*--------------------------------------------------
+xtset PR Year
+
+// FE
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	, fe
+	
+xttest2	
+
+/*
+^xttest2^ tests the hypothesis that the residual correlation matrix, computed 
+over observations common to all cross-sectional units, is an identity matrix 
+of order N_g, where N_g is the number of cross-sectional units. The resulting 
+test statistic is distributed Chi-squared(d), where d=N_g * (N_g - 1) /2, 
+under the null hypothesis of cross-sectional independence.
+Since our result of this test is significant, there is cross-sectional dependance
+in our data.
+*/
+	
+// + cluster robust inference
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	, fe cluster(PR)
+
+
+*Random-Effect (RE) Estimation
+*--------------------------------------------------
+
+// declare panel data structure
+xtset PR Year
+
+// RE(primary lang omitted)
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang  , re
+	
+	
+// + time-constant explanatory variable (primary_lang)
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang , re
+
+// + cluster robust inference & period effect
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	i.Year, re cluster(PR)
+
+	
+*--------------------------------------------------
+*--------------------------------------------------
+*Choosing the Right Model
+*--------------------------------------------------
+*--------------------------------------------------
+
+xtset PR Year
+
+** FE:
+
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang, fe rob cluster(PR)
+estimates store fe
+
+** GLS:
+
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang, re rob cluster(PR)
+estimates store re
+
+** Between estimator:
+
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang, be 
+estimates store be
+
+estimates table fe re be, star(0.01 0.05 0.1)
+
+
+*Hausman Test
+*--------------------------------------------------
+
+// fixed effects model
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	, fe i(PR)
+estimates store fixed
+
+// random effects model
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	, re i(PR)
+estimates store random
+
+// hausman test
+hausman fixed random
+
+/*
+Null H0 -> RE is appropriate model
+Our p-value is 0.003 which is less than significance level of 5%
+meaning we reject the null hypothesis that RE is appropriate and instead accept
+that Fixed Effects is appropriate. 
+*/
+
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc primary_lang ///
+	, fe i(PR)
+
+ssc install xttest3
+xttest3
+//thes test indicated we have heteroskedasticity, meaning we should use the robust
+//option
+
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate f_married log_feduc primary_lang ///
+	, fe vce(robust)
+
+
+*Verifying our Hyposetheses/Assumptions
+*--------------------------------------------------
+
+//Heteroskedasticity
+
+ssc install xttest3
+xttest3
+//thes test indicated we have heteroskedasticity, meaning we should use the robust
+//option
+
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate f_married log_feduc primary_lang ///
+	, fe vce(robust)
+
+
+//A1 (bias): E(u_i)=0 **
+
+use fixed, nocons
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate f_married log_feduc primary_lang ///
+	,i(PR) fe nocons
+
+
+//A2 (autocorrelation): E(u_i u_j) = sigma^2 I_N
+
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate f_married log_feduc primary_lang ///
+	,fe vce(robust)
+	
+	
+xtgls f_lfp fty_rate mean_capita_pi unemp_rate f_married log_feduc primary_lang, ///
+	igls panels(heteroskedastic)	
+	
+estimates store hetero
+
+local df = e(N_g) - 1
+lrtest hetero , df(`df')
+
+
+//A3 (colinearity): X is full rank
+
+xtreg f_lfp fty_rate mean_capita_pi log_feduc f_married unemp_rate, fe
+ 
+vif(uncentered)
+
+//A4 (endogeneity/bias): cov(x,u_i) = 0 
+
+ssc install ranktest
+
+ivreg2 f_lfp fty_rate primary_lang i.Year (mean_capita_pi = unemp_rate ///
+	log_feduc),cluster(PR) 
+
+/*
+The underidentification test gives us a value of 0.0729. If we take a signficance 
+level of 10%, then we can reject the null hypothesis and conclude that there is
+no underidentification present in the model. 
+
+Do the IV instruments have the ability to fully define the endogenous variable?
+It tests for the explanatory power of IV. 
+If any critical values is > f-stastistic, our instruments are weak instruments.
+In our case, none of the instruments are weak instruments as they are all < f-stat.
+ 
+*/
+	
+	
+ivreg2 f_lfp fty_rate primary_lang i.Year (mean_capita_pi = unemp_rate ///
+	log_feduc), endog(mean_capita_pi)
+	
+/*
+
+Our Sargan Statistic and Endogeneity statistics are both significant.	A rejection
+of the null hypothesis casts doubt on the validity of our instrumets. Regarding
+the endogeneity, we reject the null hypothesis that the specified endogenous 
+regressors can actually be treated as exogenous.
+Thus, mean_capita_pi is endogenous according to the endogeneity test. We can
+further test for heteroscedasiticty.
+
+*/	
+
+ivreg f_lfp fty_rate primary_lang (mean_capita_pi = unemp_rate ///
+	log_feduc)
+	
+ivhettest
+// p-value is significant, disturbance is homoskedastic. 
+	
+
+
+*Using and Analyzing our results in the Fixed-Effects Model
+*--------------------------------------------------
+
+
+xtset PR Year
+xtreg f_lfp fty_rate mean_capita_pi unemp_rate log_feduc ///
+	primary_lang, fe vce(robust)
+/*
+Which Variables have significant effects on female labour participation rate?
+
+In the above results, fertility rate, mean per capita personal income, 
+unemployment rate log of female enrolled in secondary education, all havea a 
+significant effect on female labour force participation if we take a 
+significance level of 10%.
+
+The rho value is 0.93 which indicates the individual effects of cross-sections
+are 0.93%
+
+As expected, unemployment rate is negavitely correlated with f_lfp. The same can 
+be said for log_feduc.
+*/
+
+
+
+//Conclusion (see PDF). 
+
+log close
+exit
