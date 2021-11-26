@@ -1,0 +1,442 @@
+---
+title: "ML Notebook"
+output: html_notebook
+---
+
+First we set our working directory and then load our CSV file into R. 
+
+```{r include=FALSE}
+setwd("Users/mariasannikov/Desktop/Nice_EE/S2/BigDataMachineL/ML_Project")
+getwd()
+
+library(readr)
+
+library(readxl)
+x2019 <- read_excel("/Users/mariasannikov/Desktop/NiceEE/S2/BigDataMachineL/2019.xlsx", 
+                    col_types = c("numeric", "text", "text", 
+                                  "numeric", "numeric", "numeric", 
+                                  "numeric", "numeric", "numeric", 
+                                  "numeric"))
+```
+
+```{r}
+# MACHINE LEARNING AND ALGORITHMS 
+
+library(caret)
+library("e1071")
+library("caTools")
+library("nnet")
+
+# Visualization
+library("lattice")
+library("ggplot2")
+
+#Database
+library("ISLR") # for regression the wage dataset
+library("kernlab") # for classification the spam dataset
+
+library(PASWR)
+library(rpart)
+library('matrixStats')
+```
+
+In order to test if the model we created is any good, we will split our dataset into two: 
+80% of which we will use to train our models, and 20% that we will use as a validation dataset. 
+
+```{r include=FALSE}
+library(magrittr)
+x2019$Region%<>% factor
+levels(x2019$Region)
+
+library(magrittr)
+x2019$Country%<>% factor
+levels(x2019$Country)
+
+###############
+# DATA VALIDATION
+##############
+
+# create a list of 80% of the rows in the original dataset we can use for training
+validation_index <- createDataPartition(x2019$Region, p=0.80, list=FALSE)
+# select 20% of the data for validation
+validation <- x2019[-validation_index,]
+# use the remaining 80% of data to training and testing the models
+x2019 <- x2019[validation_index,]
+```
+
+
+```{r include=FALSE}
+###############
+# DATA SUMMARY
+##############
+
+# list the levels for the class
+levels(x2019$Region)
+
+# dimensions of dataset
+dim(x2019)
+
+# list types for each attribute
+sapply(x2019, class)
+
+# summarize the class distribution
+percentage <- prop.table(table(x2019$Region)) * 100
+cbind(freq=table(x2019$Region), percentage=percentage)
+
+
+#We can see that each class has a different number of instances and percentage. 
+#Sub-Saharan Africa has the highest frequency and percentage.We proceed with a statistical summary of each attribute:
+
+# statistical attribute distributions
+summary(x2019)
+
+###############
+# VISUALIZATION
+##############
+
+#reordering columns
+x2019 <- x2019[, c(3,2,1,4,5,6,7,8,9,10)]
+
+x <- x2019[,2:10]
+y <- x2019[,1]
+
+```
+
+The classes are not evenly distributed, with Sub-Saharan Africa taking a majority. 
+
+Evaluation Algorithms:
+We will proceed with creating models of the data to estimate the accuracy of unseen data.
+We will do the following: 
+1. Set-up the test harness to use 10-fold cross validation.
+2. Build 5 different models to predict which Region we are talking about the Happiness Test results.
+3. Select the best model.
+
+```{r include=FALSE}
+###############
+# EVALUTATING ALGORITHMS
+##############
+
+library(caret)
+
+# Run algorithms using 10-fold cross validation
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+
+# a) nonlinear algorithms
+# CART
+set.seed(7)
+fit.cart <- train(Region~., data=x2019, method="rpart", metric=metric, trControl=control)
+
+# kNN
+set.seed(7)
+fit.knn <- train(Region~., data=x2019, method="knn", metric=metric, trControl=control)
+
+# b) advanced algorithms
+# SVM
+set.seed(7)
+fit.svm <- train(Region~., data=x2019, method="svmRadial", metric=metric, trControl=control)
+# Random Forest
+set.seed(7)
+fit.rf <- train(Region~., data=x2019, method="rf", metric=metric, trControl=control)
+
+#Summarize accuracy
+results <- resamples(list(cart=fit.cart, knn=fit.knn, svm=fit.svm, rf=fit.rf))
+summary(results)
+
+# compare accuracy of models
+dotplot(results)
+```
+We now have our model accuracies and we can summarize the best model, which is Random Forest. 
+
+```{r include=FALSE}
+# summarize Best Model
+print(fit.rf)
+```
+
+Seeing as the RF model was the most accurate, we can get an idea its accuracy on the validation dataset.
+We can summarize this using a confusion matrix: 
+
+```{r include=FALSE}
+# estimate skill of Random Forest on the validation dataset
+predictions <- predict(fit.rf, validation)
+confusionMatrix(predictions, validation$Region)
+
+```
+We can see that the accuracy is around 53% which is not very good. We cannot conclud here on the reliability of our model. 
+
+To conclude with our model selection we say that random forest yield the highest accuracy but it is far form being 100% accurate.
+
+Now that we've finished the machine learning part, we can proceed with a descriptive analysis with our dataset.
+
+
+```{r include=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(plotly)
+library(knitr)
+###############
+# DESCRIPTIVE STATISTICS
+##############
+
+library(readxl)
+dta_2019 <- read_excel("/Users/mariasannikov/Desktop/NiceEE/S2/BigDataMachineL/2019.xlsx", 
+                    col_types = c("numeric", "text", "text", 
+                                  "numeric", "numeric", "numeric", 
+                                  "numeric", "numeric", "numeric", 
+                                  "numeric"))
+
+happy_2019 <- as.data.frame(dta_2019)
+names(happy_2019)
+names(happy_2019) <- c("happiness_rank", "country", "region", "happiness_score", "GDP_per_capita", "social_support", "life_exp", "freedom", "generosity", "corruption")
+kable(head(happy_2019[, c("happiness_rank", "country", "region", "happiness_score")],10))
+kable(tail(happy_2019[, c("happiness_rank", "country", "region", "happiness_score")],10))
+
+
+```
+
+```{r}
+library(ggplot2)
+library("plotly")
+library(plotly)
+library(kableExtra)
+library(knitr)
+library(readr)
+library(tidyverse)
+library(ggplot2) # For charts
+library("factoextra")
+library(factoextra) # Clustering
+library(FactoMineR) # Clustering
+library("heatmaply")
+library(heatmaply) # Heatmap chart
+library(cluster) # Clustering
+library(Hmisc) # To impute values
+library(corrplot) # Correlation Analysis
+library(GGally) 
+library("repr")
+library(repr)
+library(ggrepel)
+
+###############
+# DESCRIPTIVE STATISTICS
+##############
+
+#table with average happiness per region
+avg_happiness_region <-happy_2019 %>%
+  group_by(region) %>%          
+  summarise(avg_happiness = mean(happiness_score, round(1)))
+
+#Map
+library("rworldmap")
+library(sp)
+library(rworldmap)
+
+#2019
+d2019 <- data.frame(country=x2019$Country,value=x2019$GDP_per_capita)
+n2019 <- joinCountryData2Map(d2019, joinCode="NAME", nameJoinColumn="country")
+mapCountryData(n2019, nameColumnToPlot="value", mapTitle="World Map for GDP Score per Capita-2019",colourPalette="terrain",oceanCol="lightblue",borderCol='black')
+
+
+```
+
+```{r}
+#Regional Comparison
+#Plotting the average happiness scores to compare regions
+
+p_avg_happiness_region <- plot_ly(avg_happiness_region, x = ~region,
+                                  y = ~avg_happiness, 
+                                  type = 'bar', 
+                                  name = 'Average Happiness',
+                                  marker = list(color = 'rgb(158,202,225)'))%>%
+  add_lines(y = ~mean(happy_2019$happiness_score), name = 'world average')%>%
+  layout(title="Average Happiness per Region in 2019", yaxis = list(title = "avg. happiness score"))
+htmltools::tagList(list(p_avg_happiness_region))
+
+```
+
+
+```{r}
+
+#Correlogram
+library(corrplot)
+num_hap <- happy_2019[, c("happiness_rank", "happiness_score", "GDP_per_capita", "social_support", "life_exp", "freedom", "generosity", "corruption")]
+m <- cor(num_hap) #creating correlation matrix
+corrplot(m, method="circle", type='upper', tl.cex=0.8, tl.col = 'black')
+
+cor(happy_2019$happiness_score, happy_2019$GDP_per_capita)
+
+ggplot(happy_2019, aes(x=happy_2019$GDP_per_capita, y=happy_2019$happiness_score))+ 
+  geom_point(aes(color = happy_2019$region)) +
+  geom_smooth(method="lm") + 
+  xlab("GDP per Capita") + 
+  ylab("Happiness Score") + 
+  labs(colour="Region") +
+  ggtitle("All Regions: Happiness Score & GDP per Capita (2019)")
+
+cor(happy_2019$happiness_score, happy_2019$social_support)
+# = 0.7770578
+unique(happy_2019$region)
+library(ggplot2)
+library("ggthemes")
+library(ggthemes)
+library(viridis)
+```
+The correlation matrix graph shows us that there is a strong correlation between GDP and happiness-score. This is further proved through the correlation coefficient which is 0.79.
+
+
+```{r}
+#FREEDOM AND HAPPINESS
+
+ggplot(happy_2019, 
+       aes(x = freedom, 
+           y = happiness_score)) +
+  geom_point(aes(colour = region),
+             size = 2) +
+  geom_smooth(method="lm") +
+  labs(x = "freedom Score",
+       y = "Happiness Score",
+       title = "Are free countries happy countries?",
+       subtitle = "Data openness and happiness by country in 2019") +
+  scale_color_viridis(discrete = T) +
+  theme_minimal() +
+  theme(text = element_text(size=16))
+
+```
+
+The above graph shows that Western European countries have a bigger freedom and happiness score.
+This shows us that a higher freedom score is positivelt corelatedd with their happiness score.
+```{r}
+
+###############
+# RECURSIVE PARTIONING AND REGRESSION TREES
+##############
+
+ggplot(happy_2019, 
+       aes(x = GDP_per_capita, 
+           y = happiness_score)) +
+  geom_point(aes(colour = region),
+             size = 2) +
+  geom_smooth(method="lm") +
+  labs(x = "GDP Score",
+       y = "Happiness Score",
+       title = "Are rich countries countries happier?",
+       subtitle = "Data GDP and happiness by country in 2019") +
+  scale_color_viridis(discrete = T) +
+  theme_minimal() +
+  theme(text = element_text(size=16))
+```
+
+The Above Graph shows us that countries with higher GDP scores (such as Western European countries) have a higher happiness score. We can also observe some clustering of Sub-Saharan Africa at the bottom left of the graph showing that this region has a low GDP score and thus a low Happiness score. 
+
+
+
+```{r}
+
+library(rpart)
+library("rpart.plot")
+library(rpart.plot)
+
+#Removing happiness Rank
+happy_2019_tree <- happy_2019[,c("happiness_rank", "country", "region", 
+                                 "happiness_score", "GDP_per_capita", 
+                                 "social_support", "life_exp", "freedom", 
+                                 "generosity", "corruption")]
+
+fit <- rpart(formula = happiness_score~GDP_per_capita+social_support+life_exp+corruption+
+               freedom+generosity, 
+             data = happy_2019_tree,
+             method="anova") 
+#finding the optimal cp
+
+plotcp(fit)
+
+fit <- rpart(formula = happiness_score~GDP_per_capita+social_support+life_exp+corruption+
+               freedom+generosity, 
+             data = happy_2019_tree,
+             method="anova",  #regression tree
+             control=rpart.control(cp=0.025)) #optimal cp value 
+
+rpart.plot(fit, box.palette = c("blue","orange"), main="Regression Tree for Happiness Score")
+```
+
+```{r}
+###############
+# PCA and CLUSTER ANALYSIS
+##############
+
+# There exists a correlation between different inputs variables. 
+#We are going to do a PCA analysis in order to confirm the linear relationship among the input variables.
+#To do this analysis, we'll continue to use the 2019 data.
+
+library(factoextra)
+library(FactoMineR)
+library("devtools")
+library(devtools)
+library(ggsignif)
+library(rstatix)
+
+#PCA test °1: 
+head(happy_2019)
+fit <- PCA(happy_2019[,-(1:3)], scale.unit = TRUE, ncp = 8, graph = FALSE)
+
+(eig <- get_eigenvalue(fit))  # Dimension 3: variance at 83.6% --> we choose this one 
+fviz_eig(fit, addlabels = TRUE)
+
+#PCA test °2: 
+fit2 <- PCA(happy_2019[,-(1:3)], scale.unit = TRUE, ncp = 3, graph = FALSE)
+# Correlation between PCA and Variables
+var <- get_pca_var(fit2)
+corrplot::corrplot(var$cor)
+```
+Conclusion of PCA analysis:
+Happiest countries' happiness are directly correlated with GDP, Social Support, Healthy Life Expectancy and Freedom of choice; less correlated with corruption. Happiest score has negative correlation with corruption in happiest countries. We can proceed with a Cluster analysis. 
+
+
+```{r}
+fviz_pca_var(fit2, axes = c(1,2) ,col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+fviz_pca_var(fit2, axes = c(2,3) ,col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+##Cluster Analysis
+### Cluster Analysis using the k-means method.
+set.seed(1234)
+
+#Standarized the data
+library(heatmaply)
+data_ST <- scale(happy_2019[,-(1:3)])
+d_ST <- dist(data_ST, method = "euclidean")
+ggheatmap(as.matrix(d_ST), seriate = "mean", cexRow = 0.5, cexCol = 0.5)
+```
+We can see there are different groups of countries in the graphic, now we are going to find out which is the correct cluster's number by using the Silhouette and the Elbow Methods.
+
+```{r}
+#Silhouette Method
+fviz_nbclust(data_ST, kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method") 
+# Number of Clusters: 3 (Silhouette method)
+
+#Elbow method
+fviz_nbclust(data_ST, kmeans, method = "wss")+
+  labs(subtitle = "Elbow method")
+
+```
+The silhouette method suggests to use 3 clusters, however, from Elbow method we can see dividing 156 into 3 clusters is not the best choice. Because 3 groups can not tolerant here. We will choose 4 clusters here. 
+
+
+```{r}
+# K-MEANS
+set.seed(1234)
+countries <- kmeans(data_ST, 4)
+# Cluster Quality
+library(cluster)
+library(factoextra)
+sil <- silhouette(countries$cluster, dist(data_ST))
+rownames(sil) <- rownames(data)
+fviz_silhouette(sil)
+```
+The above plot help us to identify if there are observations who are classified incorrectly in each cluster.If the observation is closer to 1, it  indicates that the country has a high happiness score. On the other hand, if the country has a negative value, it  means that the country is less happier. 
+
+
+
+OVERALL CONCLUSION:
+
+The random forest yields the highest accuracy. If we had more data, we could repeat the experiment with a larger sample and see if the large dataset improves the performance of any of the tree methods. 
